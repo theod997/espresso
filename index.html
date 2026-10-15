@@ -46,14 +46,6 @@ header {
   border-bottom: 1px solid var(--line);
 }
 header h1 { font-size: 19px; margin: 0; flex: 1; letter-spacing: .2px; }
-.pill {
-  border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
-  padding: 7px 12px; font-size: 13px; white-space: nowrap;
-}
-.pill.ok { color: var(--good); }
-.pill.wait { color: var(--warn); }
-.pill.err { color: var(--bad); }
-.iconbtn { border: 0; background: none; font-size: 22px; padding: 4px 6px; color: var(--muted); }
 
 main { padding: 12px 16px 24px; max-width: 560px; margin: 0 auto; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 14px; margin-bottom: 12px; }
@@ -211,14 +203,10 @@ dialog ul { padding-left: 20px; margin: 6px 0; }
 
 <header>
   <h1>Espresso 1:2</h1>
-  <button id="syncPill" class="pill">…</button>
-  <button id="menuBtn" class="iconbtn" aria-label="Réglages">⋯</button>
 </header>
 
 <!-- ============ Onglet Shot ============ -->
 <main id="tabShot">
-  <div id="setupBanner" class="banner hidden"></div>
-
   <div id="carousel" class="carousel"></div>
 
   <div id="editBanner" class="banner hidden">
@@ -299,23 +287,11 @@ dialog ul { padding-left: 20px; margin: 6px 0; }
 <dialog id="dlg"></dialog>
 <div id="toast" class="toast"></div>
 
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://apis.google.com/js/api.js" async defer></script>
 <script>
 /* =====================================================================
-   1. À REMPLIR : identifiants Google Cloud (voir README)
+   1. Constantes (tout est stocké sur le téléphone, rien n'est envoyé ailleurs)
    ===================================================================== */
-const CLIENT_ID = ''; // ex. '123456789012-abc123.apps.googleusercontent.com'
-const API_KEY   = ''; // ex. 'AIzaSy...'
-
-/* =====================================================================
-   2. Constantes
-   ===================================================================== */
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
-const HEADER = ['id', 'date', 'heure', 'cafe', 'torrefaction', 'dose_g', 'tasse_g', 'ratio', 'temps_s', 'clics_k6', 'gout', 'note'];
-const CAFES_TAB = 'cafes';
-const CAFES_HEADER = ['nom', 'torrefaction', 'date_torrefaction'];
+const HEADER = ['id', 'date', 'heure', 'cafe', 'torrefaction', 'dose_g', 'tasse_g', 'ratio', 'temps_s', 'clics_k6', 'gout', 'note']; // colonnes de l'export CSV
 const DEFAULT_CAFES = [
   { nom: 'Lavazza Qualità Oro', torrefaction: 'moyenne', date: '' },
   { nom: 'Meo Bio', torrefaction: 'moyenne', date: '' },
@@ -325,20 +301,19 @@ const TIME_LO = 25, TIME_HI = 30;
 const PREINF = 6; // secondes approximatives avant les premières gouttes (sert à estimer le temps à 1:2)
 
 /* =====================================================================
-   3. Stockage local (copie sur le téléphone)
+   2. Stockage local (sur le téléphone)
    ===================================================================== */
 const load = (k, d) => { try { const v = localStorage.getItem('es.' + k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem('es.' + k, JSON.stringify(v)); } catch {} };
 
 let cafes = load('cafes', DEFAULT_CAFES);
-let shots = load('shots', []);       // copie locale de la feuille
-let queue = load('queue', []);       // opérations en attente d'envoi
+let shots = load('shots', []);
 let next = load('next', {});         // "prochaine recette" par café
-let S = load('settings', { sheetId: '', sheetName: '', cafe: '', tipIdx: 0 });
-const saveAll = () => { save('cafes', cafes); save('shots', shots); save('queue', queue); save('next', next); save('settings', S); };
+let S = load('settings', { cafe: '', tipIdx: 0 });
+const saveAll = () => { save('cafes', cafes); save('shots', shots); save('next', next); save('settings', S); };
 
 /* =====================================================================
-   4. Petits utilitaires
+   3. Petits utilitaires
    ===================================================================== */
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
@@ -348,7 +323,6 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const nowHM = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
-const isTmp = (id) => String(id).startsWith('tmp-');
 const ratioOf = (s) => (s.dose > 0 ? s.tasse / s.dose : 0);
 const sortKey = (s) => `${s.date} ${s.heure}`;
 const tours = (c) => { const t = Math.floor(c / 60), r = c % 60; return `${t} tour${t > 1 ? 's' : ''} ${r}`; };
@@ -374,7 +348,7 @@ const inTarget = (s) => { const p = profile(roastOf(s)), R = ratioOf(s); return 
 const shotsOf = (cafe) => shots.filter((s) => s.cafe === cafe).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
 /* =====================================================================
-   5. Formulaire de saisie
+   4. Formulaire de saisie
    ===================================================================== */
 const F = { cafe: '', dose: 180, clics: 30, temps: 28, tasse: 36, gout: '', note: '' }; // dose en dixièmes de gramme
 let editingId = null;
@@ -460,19 +434,19 @@ function cafeDialog(existing) {
       const old = existing.nom;
       Object.assign(existing, item);
       if (old !== nom) { // on renomme aussi les shots de ce café
-        shots.filter((s) => s.cafe === old).forEach((s) => { s.cafe = nom; qUpdate(s.id); });
+        shots.filter((s) => s.cafe === old).forEach((s) => { s.cafe = nom; });
         if (next[old]) { next[nom] = next[old]; delete next[old]; }
         if (F.cafe === old) F.cafe = S.cafe = nom;
       }
     } else { cafes.push(item); prefill(nom); }
-    qCafes(); saveAll(); d.close(); renderAll(); syncSoon();
+    saveAll(); d.close(); renderAll();
   };
   if (existing) $('cDel').onclick = async () => {
     d.close();
     if (!(await ask({ title: `Supprimer « ${existing.nom} » ?`, body: 'Les shots déjà enregistrés de ce café sont conservés.', ok: 'Supprimer', danger: true }))) return;
     cafes = cafes.filter((x) => x !== existing);
     if (F.cafe === existing.nom) prefill(cafes[0]?.nom || '');
-    qCafes(); saveAll(); renderAll(); syncSoon();
+    saveAll(); renderAll();
   };
   d.showModal();
 }
@@ -507,23 +481,22 @@ async function onSave() {
 
   if (editingId) {
     const s = shots.find((x) => String(x.id) === String(editingId));
-    if (s) { Object.assign(s, data); qUpdate(s.id); }
+    if (s) Object.assign(s, data);
     editingId = null; saveAll(); prefill(F.cafe); renderAll();
-    toast('Shot modifié'); syncNow(); showTab('hist');
+    toast('Shot modifié'); showTab('hist');
     return;
   }
-  const shot = { id: 'tmp-' + Date.now().toString(36), date: today(), heure: nowHM(), ...data };
+  const shot = { id: nextId(), date: today(), heure: nowHM(), ...data };
   const prev = shotsOf(F.cafe);
-  shots.push(shot); qAdd(shot.id);
+  shots.push(shot);
   delete next[F.cafe];
   saveAll();
-  syncNow(); // on tente l'envoi tout de suite (dans le geste du doigt, pour la connexion Google si besoin)
   showResult(shot, prev);
   F.gout = ''; $('note').value = ''; renderAll();
 }
 
 /* =====================================================================
-   6. Moteur de conseils
+   5. Moteur de conseils
    ===================================================================== */
 function analyze(shot, prev) {
   const roast = roastOf(shot), P = profile(roast);
@@ -689,7 +662,7 @@ function showResult(shot, prev) {
 function closeResult() { $('result').classList.add('hidden'); document.body.style.overflow = ''; window.scrollTo(0, 0); }
 
 /* =====================================================================
-   7. Accueil : meilleur réglage + mini-stats par café
+   6. Accueil : meilleur réglage + mini-stats par café
    ===================================================================== */
 function bestOf(list) {
   const dist = (s) => Math.abs(ratioOf(s) - 2);
@@ -727,7 +700,7 @@ function renderStats() {
 }
 
 /* =====================================================================
-   8. Historique
+   7. Historique
    ===================================================================== */
 let histFilter = '';
 function renderHistory() {
@@ -735,12 +708,11 @@ function renderHistory() {
   $('histFilter').innerHTML = [['', 'Tous'], ...names.map((n) => [n, n])].map(([v, l]) =>
     `<button class="chip ${histFilter === v ? 'sel' : ''}" data-filter="${esc(v)}">${esc(l)}</button>`).join('');
   const list = shots.filter((s) => !histFilter || s.cafe === histFilter).sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
-  const pendingIds = new Set(queue.map((o) => String(o.id)));
   $('histList').innerHTML = list.length ? list.map((s) => {
     const R = ratioOf(s), ok = inTarget(s);
     const g = goutLabel[norm(s.gout).replace(/\s/g, '')] || s.gout;
     return `<div class="card shot">
-      <div class="top"><b>${esc(s.cafe)}</b><span class="muted small">${dateFr(s.date)} · ${esc(s.heure)}${isTmp(s.id) || pendingIds.has(String(s.id)) ? ' · ⏳' : ''}</span></div>
+      <div class="top"><b>${esc(s.cafe)}</b><span class="muted small">${dateFr(s.date)} · ${esc(s.heure)}</span></div>
       <div class="vals"><span><span class="dot ${ok ? 'ok' : 'warn'}"></span>1:${fr(R)}</span><span>${fr(s.dose)} g → ${Math.round(s.tasse)} g</span>
         <span>${s.temps} s</span><span>${s.clics} clics</span>${g ? `<span>${esc(g)}</span>` : ''}</div>
       ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}
@@ -752,7 +724,7 @@ function renderHistory() {
 function startEdit(id) {
   const s = shots.find((x) => String(x.id) === String(id)); if (!s) return;
   editingId = s.id;
-  if (!cafeByName(s.cafe)) { cafes.push({ nom: s.cafe, torrefaction: s.torrefaction || 'moyenne', date: '' }); qCafes(); saveAll(); }
+  if (!cafeByName(s.cafe)) { cafes.push({ nom: s.cafe, torrefaction: s.torrefaction || 'moyenne', date: '' }); saveAll(); }
   F.cafe = s.cafe; F.dose = Math.round(s.dose * 10); F.clics = s.clics; F.temps = s.temps; F.tasse = Math.round(s.tasse);
   F.gout = Object.keys(goutLabel).includes(norm(s.gout)) ? { acide: 'acide', equilibre: 'équilibré', amer: 'amer' }[norm(s.gout)] : '';
   $('note').value = s.note || '';
@@ -762,7 +734,7 @@ function startEdit(id) {
 async function delShot(id) {
   const s = shots.find((x) => String(x.id) === String(id)); if (!s) return;
   if (!(await ask({ title: 'Supprimer ce shot ?', body: `${esc(s.cafe)} · ${dateFr(s.date)} ${esc(s.heure)}`, ok: 'Supprimer', danger: true }))) return;
-  shots = shots.filter((x) => x !== s); qDelete(s.id); saveAll(); renderAll(); syncNow();
+  shots = shots.filter((x) => x !== s); saveAll(); renderAll();
 }
 
 function exportCsv() {
@@ -776,243 +748,45 @@ function exportCsv() {
 }
 
 /* =====================================================================
-   9. Google : connexion, choix de la feuille, lecture/écriture Sheets
+   8. Identifiants, export CSV et import unique des anciens shots
    ===================================================================== */
-const configured = () => !!(CLIENT_ID && API_KEY);
-let token = load('token', null);
-const validToken = () => (token && token.exp > Date.now() + 60e3 ? token.t : null);
-let tokenClient = null, tokenWaiter = null;
+const nextId = () => String(Math.max(0, ...shots.map((s) => parseInt(s.id, 10)).filter((n) => !isNaN(n))) + 1);
 
-function requestToken() {
-  return new Promise((res, rej) => {
-    if (!window.google?.accounts?.oauth2) return rej(new Error('Google pas encore chargé, réessaie dans un instant.'));
-    if (!tokenClient) tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID, scope: SCOPE,
-      callback: (r) => { const w = tokenWaiter; tokenWaiter = null; if (r.error) w?.rej(r); else { token = { t: r.access_token, exp: Date.now() + r.expires_in * 1000 }; save('token', token); S.consented = true; save('settings', S); w?.res(token.t); } },
-      error_callback: (e) => { const w = tokenWaiter; tokenWaiter = null; w?.rej(e); },
-    });
-    tokenWaiter = { res, rej };
-    tokenClient.requestAccessToken({ prompt: S.consented ? '' : 'consent' });
-  });
-}
-
-function pickSheet() {
-  return new Promise((res, rej) => {
-    gapi.load('picker', () => {
-      const view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS).setMode(google.picker.DocsViewMode.LIST).setQuery('Espresso Shots');
-      new google.picker.PickerBuilder()
-        .addView(view)
-        .setOAuthToken(validToken())
-        .setDeveloperKey(API_KEY)
-        .setAppId(CLIENT_ID.split('-')[0]) // numéro du projet = début du CLIENT_ID
-        .setLocale('fr')
-        .setTitle('Choisis ta feuille « Espresso Shots »')
-        .setCallback((d) => {
-          if (d.action === google.picker.Action.PICKED) res(d.docs[0]);
-          else if (d.action === google.picker.Action.CANCEL) rej(new Error('cancel'));
-        })
-        .build().setVisible(true);
-    });
-  });
-}
-
-class AuthError extends Error {}
-async function api(url, method = 'GET', body) {
-  const t = validToken(); if (!t) throw new AuthError();
-  const r = await fetch(url, { method, headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-  if (r.status === 401) { token = null; save('token', null); throw new AuthError(); }
-  if (!r.ok) throw new Error(`Google Sheets ${r.status} : ${(await r.text()).slice(0, 200)}`);
-  return r.json();
-}
-const A = (tab, range) => encodeURIComponent(`'${tab.replace(/'/g, "''")}'!${range}`);
-const sheetUrl = (p) => `${SHEETS}/${S.sheetId}${p}`;
-
-// Valeurs écrites "telles quelles" : date AAAA-MM-JJ, décimales avec un point
+// Valeurs exportées : date AAAA-MM-JJ, décimales avec un point
 function toRow(s) {
-  const id = isTmp(s.id) ? '' : Number(s.id) || s.id;
-  return [id, s.date, s.heure, s.cafe, s.torrefaction || '', String(+Number(s.dose).toFixed(1)), Math.round(s.tasse),
+  return [s.id, s.date, s.heure, s.cafe, s.torrefaction || '', String(+Number(s.dose).toFixed(1)), Math.round(s.tasse),
     ratioOf(s).toFixed(2), s.temps, s.clics, s.gout || '', s.note || ''];
 }
-const num = (v) => (typeof v === 'number' ? v : parseFloat(String(v ?? '').replace(',', '.').replace(/\s/g, '')));
-function parseDate(v) {
-  const s = String(v ?? '').trim();
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
-  m = s.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})/); if (m) return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
-  return s;
-}
-function parseRow(r) {
-  const [id, date, heure, cafe, torr, dose, tasse, , temps, clics, gout, note] = r;
-  if (!cafe || !(num(dose) >= 0)) return null;
-  const h = String(heure ?? '').match(/(\d{1,2}):(\d{2})/);
-  return { id: String(id ?? ''), date: parseDate(date), heure: h ? `${pad(h[1])}:${h[2]}` : '', cafe: String(cafe).trim(),
-    torrefaction: String(torr ?? '').trim(), dose: num(dose) || 0, tasse: num(tasse) || 0, temps: Math.round(num(temps) || 0),
-    clics: Math.round(num(clics) || 0), gout: String(gout ?? '').trim(), note: String(note ?? '').trim() };
-}
 
-let meta = null; // { tab, sheetId } de l'onglet des shots
-async function ensureMeta() {
-  if (meta && meta.for === S.sheetId) return meta;
-  const info = await api(sheetUrl('?fields=properties.title,sheets.properties(sheetId,title)'));
-  const props = info.sheets.map((s) => s.properties);
-  let shotsTab = props.find((p) => p.title.toLowerCase() !== CAFES_TAB);
-  if (!shotsTab) {
-    const r = await api(sheetUrl(':batchUpdate'), 'POST', { requests: [{ addSheet: { properties: { title: 'shots' } } }] });
-    shotsTab = r.replies[0].addSheet.properties;
-  }
-  if (!props.some((p) => p.title.toLowerCase() === CAFES_TAB)) {
-    await api(sheetUrl(':batchUpdate'), 'POST', { requests: [{ addSheet: { properties: { title: CAFES_TAB } } }] });
-    await writeCafes();
-  }
-  const head = await api(sheetUrl(`/values/${A(shotsTab.title, 'A1:L1')}`));
-  if (!head.values?.length) await api(sheetUrl(`/values/${A(shotsTab.title, 'A1:L1')}?valueInputOption=RAW`), 'PUT', { values: [HEADER] });
-  S.sheetName = info.properties.title; save('settings', S);
-  meta = { for: S.sheetId, tab: shotsTab.title, sid: shotsTab.sheetId };
-  return meta;
-}
-async function writeCafes() {
-  await api(sheetUrl(`/values/${A(CAFES_TAB, 'A2:C1000')}:clear`), 'POST', {});
-  const values = [CAFES_HEADER, ...cafes.map((c) => [c.nom, c.torrefaction || '', c.date || ''])];
-  await api(sheetUrl(`/values/${A(CAFES_TAB, `A1:C${values.length}`)}?valueInputOption=RAW`), 'PUT', { values });
-}
-async function findRow(id) {
-  const r = await api(sheetUrl(`/values/${A(meta.tab, 'A:A')}`));
-  const i = (r.values || []).findIndex((v) => String(v[0] ?? '').trim() === String(id));
-  return i < 0 ? 0 : i + 1;
-}
+// Mes 7 shots d'avant l'app. Importés une seule fois, au premier lancement.
+// Le ratio n'est pas stocké : il est toujours recalculé (tasse ÷ dose).
+const LEGACY = `id,date,heure,cafe,torrefaction,dose_g,tasse_g,temps_s,clics_k6,gout,note
+1,2026-10-09,08:11,Meo Bio,,18.5,40,20,33,,1 étoile
+2,2026-10-10,09:57,Meo Bio,,18,55,20,32,,
+3,2026-10-10,18:20,Meo Bio,,18,36,21,30,,
+4,2026-10-13,07:40,Porje Mexique,,18,30,35,30,,
+5,2026-10-14,07:36,Meo Bio,,18,39,23,31,,
+6,2026-10-15,07:51,Lavazza Qualità Oro,moyenne,18,2,40,28,,à vérifier : 2 g en tasse (shot étouffé ?)
+7,2026-10-15,07:56,Meo Bio,,18,80,25,32,,dose 18 g supposée (saisie 0 g)`;
 
-// File d'attente : chaque modification est envoyée dans l'ordre dès que possible
-const saveQ = () => save('queue', queue);
-function qAdd(id) { queue.push({ op: 'add', id }); saveQ(); }
-function qUpdate(id) { if (isTmp(id) || queue.some((o) => o.op === 'update' && o.id === id)) return; queue.push({ op: 'update', id }); saveQ(); }
-function qDelete(id) {
-  if (isTmp(id)) queue = queue.filter((o) => o.id !== id);
-  else { queue = queue.filter((o) => !(o.op === 'update' && o.id === id)); queue.push({ op: 'delete', id }); }
-  saveQ();
-}
-function qCafes() { queue = queue.filter((o) => o.op !== 'cafes'); queue.push({ op: 'cafes' }); saveQ(); }
-
-async function execOp(o) {
-  if (o.op === 'cafes') return writeCafes();
-  if (o.op === 'add') {
-    const s = shots.find((x) => x.id === o.id); if (!s) return;
-    const col = await api(sheetUrl(`/values/${A(meta.tab, 'A2:A')}`));
-    const ids = (col.values || []).map((v) => parseInt(v[0], 10)).filter((n) => !isNaN(n));
-    const newId = String((ids.length ? Math.max(...ids) : 0) + 1);
-    await api(sheetUrl(`/values/${A(meta.tab, 'A1')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`), 'POST', { values: [toRow({ ...s, id: newId })] });
-    s.id = newId; // l'id définitif n'est attribué qu'une fois la ligne bien écrite
-    save('shots', shots);
-    return;
-  }
-  if (o.op === 'update') {
-    const s = shots.find((x) => x.id === o.id); if (!s) return;
-    const row = await findRow(s.id);
-    if (row) await api(sheetUrl(`/values/${A(meta.tab, `A${row}:L${row}`)}?valueInputOption=RAW`), 'PUT', { values: [toRow(s)] });
-    return;
-  }
-  if (o.op === 'delete') {
-    const row = await findRow(o.id);
-    if (row) await api(sheetUrl(':batchUpdate'), 'POST', { requests: [{ deleteDimension: { range: { sheetId: meta.sid, dimension: 'ROWS', startIndex: row - 1, endIndex: row } } }] });
-  }
-}
-
-async function pullAll() {
-  const [sv, cv] = await Promise.all([
-    api(sheetUrl(`/values/${A(meta.tab, 'A2:L')}`)),
-    api(sheetUrl(`/values/${A(CAFES_TAB, 'A2:C')}`)),
-  ]);
-  shots = (sv.values || []).map(parseRow).filter(Boolean);
-  const remote = (cv.values || []).filter((r) => r[0]).map((r) => ({ nom: String(r[0]).trim(), torrefaction: String(r[1] ?? '').trim(), date: parseDate(r[2]) }));
-  if (remote.length) cafes = remote; else await writeCafes();
-  if (!cafeByName(F.cafe) && !editingId) prefill(cafes[0]?.nom || '');
+function importLegacy() {
+  if (S.legacyImported) return;
+  const old = LEGACY.trim().split('\n').slice(1).map((line) => {
+    const [id, date, heure, cafe, torr, dose, tasse, temps, clics, gout, ...note] = line.split(',');
+    return { id, date, heure, cafe, torrefaction: torr || cafeByName(cafe)?.torrefaction || '', dose: +dose, tasse: +tasse,
+      temps: +temps, clics: +clics, gout, note: note.join(',') };
+  });
+  const key = (s) => `${s.date} ${s.heure} ${s.cafe}`;
+  const known = new Set(old.map(key));
+  const mine = shots.filter((s) => !known.has(key(s))).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+  shots = old;
+  mine.forEach((s) => { s.id = nextId(); shots.push(s); }); // shots déjà saisis : numérotés à la suite
+  S.legacyImported = true;
   saveAll();
 }
 
-let syncing = false, status = { k: 'idle' };
-async function sync() {
-  if (syncing) return;
-  if (!configured()) return setStatus('local');
-  if (!S.sheetId) return setStatus('nosheet');
-  if (!validToken()) return setStatus('auth');
-  if (!navigator.onLine) return setStatus('offline');
-  syncing = true; setStatus('syncing');
-  try {
-    await ensureMeta();
-    while (queue.length) { await execOp(queue[0]); queue.shift(); saveQ(); }
-    await pullAll();
-    setStatus('ok');
-  } catch (e) {
-    if (e instanceof AuthError) setStatus('auth');
-    else if (e instanceof TypeError) setStatus('offline'); // pas de réseau
-    else { console.error(e); setStatus('error', e.message); }
-  } finally { syncing = false; renderAll(); }
-}
-// Appelé depuis un geste du doigt : si la connexion Google a expiré, on la redemande
-function syncNow() {
-  if (configured() && S.sheetId && !validToken() && navigator.onLine) {
-    requestToken().then(sync).catch(() => setStatus('auth'));
-  } else sync();
-}
-let syncTimer; const syncSoon = () => { clearTimeout(syncTimer); syncTimer = setTimeout(sync, 400); };
-
-async function connectFlow() {
-  try {
-    if (!validToken()) await requestToken();
-    const doc = await pickSheet();
-    S.sheetId = doc.id; S.sheetName = doc.name; meta = null; save('settings', S);
-    toast(`Feuille « ${doc.name} » connectée`);
-    await sync();
-  } catch (e) {
-    if (e?.message !== 'cancel') { console.error(e); toast('Connexion impossible : ' + (e?.message || e?.type || 'erreur')); }
-    renderStatus();
-  }
-}
-
-function setStatus(k, msg) { status = { k, msg }; renderStatus(); }
-function renderStatus() {
-  const n = queue.length, p = $('syncPill');
-  const st = !configured() ? 'local' : !S.sheetId ? 'nosheet' : status.k;
-  const map = {
-    local: ['Local', 'wait'], nosheet: ['Connecter', 'wait'], auth: [n ? `Se connecter · ${n} en attente` : 'Se connecter', 'wait'],
-    offline: [n ? `⏳ ${n} en attente` : 'Hors-ligne', 'wait'], syncing: ['Synchro…', ''], ok: [n ? `⏳ ${n} en attente` : '✓ À jour', n ? 'wait' : 'ok'],
-    error: ['⚠ Erreur', 'err'], idle: [n ? `⏳ ${n} en attente` : '…', n ? 'wait' : ''],
-  };
-  const [txt, cls] = map[st] || map.idle;
-  p.textContent = txt; p.className = 'pill ' + cls;
-  const b = $('setupBanner');
-  if (!configured()) {
-    b.innerHTML = '<b>Mode local.</b> Tes shots restent sur ce téléphone. Renseigne CLIENT_ID et API_KEY dans index.html pour les envoyer dans Google Sheets (voir le README).';
-    b.classList.remove('hidden');
-  } else if (!S.sheetId) {
-    b.innerHTML = '<b>Connecte ta feuille « Espresso Shots »</b> pour sauvegarder tes shots et retrouver ton historique.<button class="secondary" id="connectBtn">Se connecter à Google</button>';
-    b.classList.remove('hidden'); $('connectBtn').onclick = connectFlow;
-  } else b.classList.add('hidden');
-}
-
-async function onPill() {
-  if (!configured()) return ask({ title: 'Mode local', body: 'Les identifiants Google ne sont pas encore renseignés dans index.html. Suis le README pour créer CLIENT_ID et API_KEY.', ok: 'OK', cancel: '' });
-  if (!S.sheetId) return connectFlow();
-  if (status.k === 'error' && !(await ask({ title: 'Erreur de synchronisation', body: esc(status.msg), ok: 'Réessayer' }))) return;
-  syncNow();
-}
-
-async function openMenu() {
-  const d = $('dlg');
-  d.innerHTML = `<h3>Réglages</h3>
-    <p class="small muted">Feuille : ${S.sheetId ? esc(S.sheetName || S.sheetId) : 'aucune'}<br>Shots enregistrés : ${shots.length} · en attente : ${queue.length}</p>
-    <div style="display:grid;gap:8px">
-      ${configured() ? `<button class="secondary" id="mSync">Synchroniser maintenant</button>
-      <button class="secondary" id="mPick">${S.sheetId ? 'Changer de feuille' : 'Choisir la feuille'}</button>` : ''}
-      ${validToken() ? '<button class="secondary" id="mOut">Se déconnecter de Google</button>' : ''}
-      <button class="secondary" id="mClose">Fermer</button>
-    </div>`;
-  const on = (id, fn) => { const b = $(id); if (b) b.onclick = () => { d.close(); fn(); }; };
-  on('mSync', syncNow); on('mPick', connectFlow); on('mClose', () => {});
-  on('mOut', () => { try { google.accounts.oauth2.revoke(token.t); } catch {} token = null; save('token', null); S.consented = false; save('settings', S); setStatus('auth'); });
-  d.showModal();
-}
-
 /* =====================================================================
-   10. Navigation et démarrage
+   9. Navigation et démarrage
    ===================================================================== */
 function showTab(t) {
   $('tabShot').classList.toggle('hidden', t !== 'shot');
@@ -1021,7 +795,7 @@ function showTab(t) {
   $('tabBtnHist').classList.toggle('sel', t === 'hist');
   window.scrollTo(0, 0);
 }
-function renderAll() { renderForm(); renderStats(); renderHistory(); renderStatus(); }
+function renderAll() { renderForm(); renderStats(); renderHistory(); }
 
 document.querySelectorAll('[data-step]').forEach((b) => {
   const [f, d] = b.dataset.step.split(':'); bindRepeat(b, () => step(f, +d));
@@ -1053,17 +827,14 @@ $('histList').addEventListener('click', (e) => {
 $('csvBtn').onclick = exportCsv;
 $('tabBtnShot').onclick = () => showTab('shot');
 $('tabBtnHist').onclick = () => showTab('hist');
-$('syncPill').onclick = onPill;
-$('menuBtn').onclick = openMenu;
-window.addEventListener('online', sync);
-window.addEventListener('offline', () => setStatus('offline'));
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
 
+importLegacy();
 prefill(cafeByName(S.cafe) ? S.cafe : cafes[0]?.nom || '');
 $('formTip').textContent = pickTip(null, null);
 renderAll();
-sync();
 
+// Demande à Chrome de ne pas effacer les données de l'app si le téléphone manque de place
+navigator.storage?.persist?.();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-worker.js');
 </script>
 </body>
