@@ -148,6 +148,7 @@ nav.tabs button.sel { color: var(--accent); }
 .shot .acts button { flex: 1; min-height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface2); font-size: 14px; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
 .dot.ok { background: var(--good); } .dot.warn { background: var(--warn); }
+.welcome { flex: 1 0 100%; margin: 0; } .welcome h3 { margin: 0 0 6px; } .welcome p { margin: 6px 0; }
 .empty { text-align: center; color: var(--muted); padding: 32px 16px; }
 
 /* ---------- Résultat ---------- */
@@ -187,6 +188,7 @@ dialog {
 dialog::backdrop { background: rgb(0 0 0 / .45); }
 dialog h3 { margin: 0 0 10px; font-size: 18px; }
 dialog .btns { display: flex; gap: 8px; margin-top: 16px; }
+#tabHist .btns { display: flex; gap: 8px; } #tabHist .btns button { flex: 1; }
 dialog .btns button { flex: 1; }
 dialog .field { margin-top: 12px; }
 dialog .field > div:first-child { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
@@ -270,7 +272,11 @@ dialog ul { padding-left: 20px; margin: 6px 0; }
   <div class="histhead">
     <div class="chips" id="histFilter"></div>
   </div>
-  <button class="secondary" id="csvBtn" style="margin-bottom:12px">Exporter en CSV</button>
+  <div class="btns" style="margin-bottom:12px">
+    <button class="secondary" id="csvBtn">Exporter en CSV</button>
+    <button class="secondary" id="csvImportBtn">Importer un CSV</button>
+  </div>
+  <input type="file" id="csvFile" accept=".csv,text/csv" hidden>
   <div id="histList"></div>
 </main>
 
@@ -292,11 +298,6 @@ dialog ul { padding-left: 20px; margin: 6px 0; }
    1. Constantes (tout est stocké sur le téléphone, rien n'est envoyé ailleurs)
    ===================================================================== */
 const HEADER = ['id', 'date', 'heure', 'cafe', 'torrefaction', 'dose_g', 'tasse_g', 'ratio', 'temps_s', 'clics_k6', 'gout', 'note']; // colonnes de l'export CSV
-const DEFAULT_CAFES = [
-  { nom: 'Lavazza Qualità Oro', torrefaction: 'moyenne', date: '' },
-  { nom: 'Meo Bio', torrefaction: 'moyenne', date: '' },
-  { nom: 'Porje Mexique', torrefaction: 'moyenne', date: '' },
-];
 const TIME_LO = 25, TIME_HI = 30;
 const PREINF = 6; // secondes approximatives avant les premières gouttes (sert à estimer le temps à 1:2)
 
@@ -306,8 +307,10 @@ const PREINF = 6; // secondes approximatives avant les premières gouttes (sert 
 const load = (k, d) => { try { const v = localStorage.getItem('es.' + k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem('es.' + k, JSON.stringify(v)); } catch {} };
 
-let cafes = load('cafes', DEFAULT_CAFES);
 let shots = load('shots', []);
+// Liste des cafés : vide pour un nouvel utilisateur. Si elle n'a jamais été enregistrée
+// mais qu'il existe des shots, on la reconstruit à partir des shots (aucune donnée perdue).
+let cafes = load('cafes', null) || [...new Map(shots.map((s) => [s.cafe, { nom: s.cafe, torrefaction: s.torrefaction || 'moyenne', date: '' }])).values()];
 let next = load('next', {});         // "prochaine recette" par café
 let S = load('settings', { cafe: '', tipIdx: 0 });
 const saveAll = () => { save('cafes', cafes); save('shots', shots); save('next', next); save('settings', S); };
@@ -696,7 +699,9 @@ function renderStats() {
         <div class="spark"><div class="t"><span>Ratio</span><span>${last.length ? '1:' + fr(ratioOf(last.at(-1))) : ''}</span></div>${spark(last.map((s) => clamp(ratioOf(s), 0.5, 4)), 1.5, 2.5, [P.lo, P.hi])}</div>
       </div></button>`;
   }).join('');
-  $('carousel').innerHTML = html;
+  $('carousel').innerHTML = html || `<div class="card welcome"><h3>Bienvenue 👋</h3>
+    <p>Commence par <b>ajouter ton café</b> juste en dessous (nom et torréfaction), puis enregistre ton premier shot : l’app te dira quoi changer au suivant.</p>
+    <p class="muted small">Tes données restent sur ce téléphone. Pense à les exporter de temps en temps (Historique → Exporter en CSV).</p></div>`;
 }
 
 /* =====================================================================
@@ -748,42 +753,59 @@ function exportCsv() {
 }
 
 /* =====================================================================
-   8. Identifiants, export CSV et import unique des anciens shots
+   8. Identifiants, export et import CSV
    ===================================================================== */
 const nextId = () => String(Math.max(0, ...shots.map((s) => parseInt(s.id, 10)).filter((n) => !isNaN(n))) + 1);
 
 // Valeurs exportées : date AAAA-MM-JJ, décimales avec un point
+// Import d'un CSV exporté par l'app (restauration, changement de téléphone).
+// Les shots déjà présents (même date, heure et café) ne sont pas dupliqués.
+function parseCsv(text) {
+  text = text.replace(/^\uFEFF/, '');
+  const sep = (text.split('\n')[0].match(/;/g) || []).length > (text.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === sep) { row.push(cur); cur = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += ch;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim()));
+}
+function importCsv(file) {
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const rows = parseCsv(String(reader.result));
+    const head = (rows.shift() || []).map((h) => norm(h));
+    const col = (name) => head.indexOf(name);
+    if (col('date') < 0 || col('cafe') < 0 || col('dose_g') < 0) return ask({ title: 'Fichier non reconnu', body: 'Utilise un CSV exporté depuis l’app (Historique → Exporter en CSV).', ok: 'OK', cancel: '' });
+    const num = (v) => parseFloat(String(v ?? '').replace(',', '.')) || 0;
+    const get = (r, n) => (col(n) >= 0 ? (r[col(n)] ?? '').trim() : '');
+    const key = (s) => `${s.date} ${s.heure} ${s.cafe}`;
+    const known = new Set(shots.map(key));
+    let added = 0;
+    rows.forEach((r) => {
+      const s = { date: get(r, 'date'), heure: get(r, 'heure'), cafe: get(r, 'cafe'), torrefaction: get(r, 'torrefaction'),
+        dose: num(get(r, 'dose_g')), tasse: num(get(r, 'tasse_g')), temps: num(get(r, 'temps_s')), clics: num(get(r, 'clics_k6')),
+        gout: get(r, 'gout'), note: get(r, 'note') };
+      if (!s.date || !s.cafe || known.has(key(s))) return;
+      s.id = nextId(); shots.push(s); known.add(key(s)); added++;
+      if (!cafeByName(s.cafe)) cafes.push({ nom: s.cafe, torrefaction: s.torrefaction || 'moyenne', date: '' });
+    });
+    saveAll(); if (!F.cafe && cafes[0]) prefill(cafes[0].nom); renderAll();
+    toast(added ? `${added} shot${added > 1 ? 's' : ''} importé${added > 1 ? 's' : ''}` : 'Aucun nouveau shot');
+  };
+  reader.readAsText(file);
+}
+
 function toRow(s) {
   return [s.id, s.date, s.heure, s.cafe, s.torrefaction || '', String(+Number(s.dose).toFixed(1)), Math.round(s.tasse),
     ratioOf(s).toFixed(2), s.temps, s.clics, s.gout || '', s.note || ''];
 }
 
-// Mes 7 shots d'avant l'app. Importés une seule fois, au premier lancement.
-// Le ratio n'est pas stocké : il est toujours recalculé (tasse ÷ dose).
-const LEGACY = `id,date,heure,cafe,torrefaction,dose_g,tasse_g,temps_s,clics_k6,gout,note
-1,2026-10-09,08:11,Meo Bio,,18.5,40,20,33,,1 étoile
-2,2026-10-10,09:57,Meo Bio,,18,55,20,32,,
-3,2026-10-10,18:20,Meo Bio,,18,36,21,30,,
-4,2026-10-13,07:40,Porje Mexique,,18,30,35,30,,
-5,2026-10-14,07:36,Meo Bio,,18,39,23,31,,
-6,2026-10-15,07:51,Lavazza Qualità Oro,moyenne,18,2,40,28,,à vérifier : 2 g en tasse (shot étouffé ?)
-7,2026-10-15,07:56,Meo Bio,,18,80,25,32,,dose 18 g supposée (saisie 0 g)`;
-
-function importLegacy() {
-  if (S.legacyImported) return;
-  const old = LEGACY.trim().split('\n').slice(1).map((line) => {
-    const [id, date, heure, cafe, torr, dose, tasse, temps, clics, gout, ...note] = line.split(',');
-    return { id, date, heure, cafe, torrefaction: torr || cafeByName(cafe)?.torrefaction || '', dose: +dose, tasse: +tasse,
-      temps: +temps, clics: +clics, gout, note: note.join(',') };
-  });
-  const key = (s) => `${s.date} ${s.heure} ${s.cafe}`;
-  const known = new Set(old.map(key));
-  const mine = shots.filter((s) => !known.has(key(s))).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
-  shots = old;
-  mine.forEach((s) => { s.id = nextId(); shots.push(s); }); // shots déjà saisis : numérotés à la suite
-  S.legacyImported = true;
-  saveAll();
-}
 
 /* =====================================================================
    9. Navigation et démarrage
@@ -825,10 +847,11 @@ $('histList').addEventListener('click', (e) => {
   if (b.dataset.del) delShot(b.dataset.del);
 });
 $('csvBtn').onclick = exportCsv;
+$('csvImportBtn').onclick = () => $('csvFile').click();
+$('csvFile').onchange = (e) => { const f = e.target.files[0]; if (f) importCsv(f); e.target.value = ''; };
 $('tabBtnShot').onclick = () => showTab('shot');
 $('tabBtnHist').onclick = () => showTab('hist');
 
-importLegacy();
 prefill(cafeByName(S.cafe) ? S.cafe : cafes[0]?.nom || '');
 $('formTip').textContent = pickTip(null, null);
 renderAll();

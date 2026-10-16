@@ -1,6 +1,6 @@
 // Service worker : garde l'app en cache pour qu'elle s'ouvre même sans réseau.
 // Change CACHE à chaque mise à jour importante pour forcer le rafraîchissement.
-const CACHE = 'espresso-v2';
+const CACHE = 'espresso-v3';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {

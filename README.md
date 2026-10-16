@@ -1,40 +1,67 @@
 # Espresso 1:2
 
-Petite application web (PWA) pour noter ses shots d'espresso (Gaggia Classic Pro + Kingrinder K6) et recevoir des conseils pour viser un ratio **1:2 en 25–30 s**.
+*[Version française](README.fr.md)*
 
-Tout est enregistré **uniquement sur le téléphone** (stockage local du navigateur) : pas de compte, pas de serveur. Au premier lancement, l'app importe automatiquement les 7 shots d'avant l'app (une seule fois).
+A tiny, free web app (PWA) to log your espresso shots and get one clear piece of advice for the next one — aiming for a **1:2 ratio in 25–30 s**.
 
-Fichiers : `index.html` (toute l'app), `manifest.json`, `service-worker.js`, `icon-192.png`, `icon-512.png`. Il n'y a rien à compiler.
+Built around a Gaggia Classic Pro and a Kingrinder K6 hand grinder, but the dialing-in logic works with any machine.
 
----
+**▶ Try it: https://theod997.github.io/espresso/**
 
-## 1. Activer GitHub Pages
-
-1. Sur GitHub, ouvre le dépôt **theod997/espresso** → onglet **Settings** → menu **Pages**.
-2. Dans **Source**, choisis **Deploy from a branch**.
-3. Dans **Branch**, choisis **main** et le dossier **/ (root)**, puis **Save**.
-4. Attends 1 à 2 minutes : l'app est en ligne sur **https://theod997.github.io/espresso/**.
-
-> Les fichiers doivent être sur la branche `main`. S'ils sont sur une autre branche, fusionne d'abord la *pull request*.
+> The interface is currently in French only.
 
 ---
 
-## 2. Installer l'app sur Android (Pixel 8)
+## Features
 
-1. Ouvre **https://theod997.github.io/espresso/** dans **Chrome**.
-2. Menu **⋮** (en haut à droite) → **Ajouter à l'écran d'accueil** → **Installer**.
-3. L'icône tasse apparaît sur l'écran d'accueil ; l'app s'ouvre en plein écran et fonctionne sans réseau.
+- **Fast shot logging** with big +/- buttons: coffee, dose, grinder clicks, time, yield, taste (sour / balanced / bitter), notes
+- **Shot diagnosis**: ratio and time vs. target, with targets adjusted to roast level (light 1:1.8–2.5, medium 1:1.8–2.2, dark 1:1.8–2.0)
+- **One change at a time**: the app tells you which single variable to adjust (grind, yield, temperature or puck prep) and suggests a **next recipe** you can apply in one tap
+- **Smart checks**:
+  - detects choked shots
+  - estimates how long the shot would have taken at the target yield, so a long or short pull still gives a useful grind hint
+  - sour/bitter with good time and ratio → temperature hints (warm-up, flush, purge after steaming)
+  - inconsistent times at the same setting → puck prep hints (WDT, distribution, level tamp)
+- **Per-coffee dashboard**: best setting so far, % of shots on target, sparklines for clicks and ratio
+- **Freshness warnings** based on roast date (best 7–30 days after roasting)
+- **History** with edit/delete, **CSV export** (opens in Excel or Google Sheets) and **CSV import** (restore or move to a new phone)
+- Grinder settings shown in clicks, turns and µm (K6: 16 µm per click)
 
----
+## Privacy & offline
 
-## 3. Sauvegarder ses données
+- No account, no server, no tracking: everything is stored **locally on your device** (browser storage).
+- Works offline once installed.
+- Every user gets their own empty app — nothing is shared between users.
 
-Les shots vivent dans Chrome, sur le téléphone. Ils sont perdus si tu **désinstalles l'app**, **effaces les données de Chrome** ou changes de téléphone.
+## Install on your phone
 
-👉 De temps en temps, va dans **Historique → Exporter en CSV** et garde le fichier (Drive, mail…). Il s'ouvre dans Google Sheets ou Excel.
+**Android (Chrome):** open the link → menu **⋮** → **Add to Home screen** → **Install**.
+**iPhone (Safari):** open the link → **Share** → **Add to Home Screen**.
 
----
+## Back up your data
 
-## Mettre à jour l'app
+Shots live in your browser only. They are lost if you uninstall the app, clear browser data or switch phones.
+Export regularly: **History → Export CSV**. To restore or move to a new phone: **History → Import CSV** (existing shots are not duplicated).
 
-Modifie les fichiers sur GitHub (branche `main`). Si le téléphone affiche encore l'ancienne version, ferme puis rouvre l'app (deux fois au besoin). Pour forcer la mise à jour, augmente le numéro de `espresso-v2` dans `service-worker.js`. Tes shots ne sont pas touchés par une mise à jour.
+## Tech
+
+Plain HTML/CSS/JavaScript in a single `index.html` — no framework, no build step.
+
+| File | Purpose |
+|---|---|
+| `index.html` | the whole app |
+| `manifest.json` | PWA manifest |
+| `service-worker.js` | offline cache |
+| `icon-192.png`, `icon-512.png` | app icons |
+
+### Run your own copy
+
+1. Fork this repo.
+2. **Settings → Pages → Deploy from a branch → `main` / (root) → Save**.
+3. Your copy is live at `https://<your-username>.github.io/espresso/` after a minute or two.
+
+To push an update to installed apps, bump the cache name (`espresso-v3`) in `service-worker.js`.
+
+## Feedback
+
+Issues and suggestions are welcome — especially if a piece of advice looks wrong for your setup.
